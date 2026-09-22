@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Account, Budget, Category, Debt, DebtPayment, RecurringTransaction, Transaction
 from app.repositories.finance_repository import FinanceRepository
-from app.schemas.finance import AccountCreate, BudgetCreate, CategoryCreate, CategoryUpdate, DebtCreate, DebtPaymentCreate, RecurringCreate, TransactionCreate, TransactionUpdate, TransferCreate
+from app.schemas.finance import AccountCreate, BudgetCreate, CategoryUpdate, DebtCreate, DebtPaymentCreate, RecurringCreate, TransactionCreate, TransactionUpdate, TransferCreate
 
 
 class FinanceService:
@@ -23,13 +23,6 @@ class FinanceService:
         self.db.commit()
         self.db.refresh(account)
         return account
-
-    def create_category(self, user_id: int, request: CategoryCreate) -> Category:
-        category = Category(user_id=user_id, name=request.name, type=request.type, color=request.color, icon=request.icon)
-        self.db.add(category)
-        self.db.commit()
-        self.db.refresh(category)
-        return category
 
     def ensure_default_categories(self, user_id: int) -> None:
         if self.repository.user_categories(user_id):

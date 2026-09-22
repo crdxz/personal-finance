@@ -8,7 +8,6 @@ from app.database.session import get_db
 from app.schemas.finance import (
     AccountCreate,
     AccountResponse,
-    CategoryCreate,
     CategoryResponse,
     CategoryUpdate,
     DebtCreate,
@@ -44,11 +43,6 @@ def create_account(request: AccountCreate, user_id: int = Depends(get_current_us
 @router.get("/accounts", response_model=list[AccountResponse])
 def list_accounts(user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> list[AccountResponse]:
     return service.repository.accounts(user_id)
-
-
-@router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
-def create_category(request: CategoryCreate, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> CategoryResponse:
-    return service.create_category(user_id, request)
 
 
 @router.get("/categories", response_model=list[CategoryResponse])

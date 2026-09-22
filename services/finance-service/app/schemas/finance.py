@@ -29,13 +29,6 @@ class AccountResponse(BaseModel):
     is_active: bool
 
 
-class CategoryCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    type: CategoryType
-    color: str = Field(default="#6AA57D", pattern=r"^#[0-9A-Fa-f]{6}$")
-    icon: str = Field(default="tag", min_length=1, max_length=40)
-
-
 class CategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

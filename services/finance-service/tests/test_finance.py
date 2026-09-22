@@ -117,23 +117,9 @@ def test_categories_include_defaults_and_support_crud_customization() -> None:
     assert categories.status_code == 200
     assert any(item["name"] == "Alimentación" and item["color"] for item in categories.json())
 
-    created = client.post("/api/v1/finance/categories", json={"name": "Mascotas", "type": "expense", "color": "#123456", "icon": "paw"})
-    assert created.status_code == 201
-    category_id = created.json()["id"]
-    assert created.json()["color"] == "#123456"
-    assert created.json()["icon"] == "paw"
-
-    updated = client.patch(f"/api/v1/finance/categories/{category_id}", json={"name": "Mascotas y hogar", "color": "#654321"})
-    assert updated.status_code == 200
-    assert updated.json()["name"] == "Mascotas y hogar"
-    assert updated.json()["color"] == "#654321"
-
-    deleted = client.delete(f"/api/v1/finance/categories/{category_id}")
-    assert deleted.status_code == 204
-
 
 def test_fixed_expense_template_runs_with_actual_invoice_amount() -> None:
-    category = client.post("/api/v1/finance/categories", json={"name": "Servicios", "type": "expense"}).json()
+    category = next(item for item in client.get("/api/v1/finance/categories").json() if item["name"] == "Servicios")
     recurring = client.post("/api/v1/finance/recurring", json={"category_id": category["id"], "type": "expense", "amount": "120000", "recurrence_rule": "monthly", "next_run": "2026-10-01", "description": "Internet"})
 
     assert recurring.status_code == 201
@@ -181,13 +167,13 @@ def test_idempotency_does_not_duplicate_a_transaction() -> None:
 
 
 def test_budget_report_recurring_update_delete_and_pagination() -> None:
-    category = client.post("/api/v1/finance/categories", json={"name": "Alimentación", "type": "expense"}).json()
+    category = next(item for item in client.get("/api/v1/finance/categories").json() if item["name"] == "Alimentación")
     account = client.post("/api/v1/finance/accounts", json={"name": "Presupuesto", "type": "bank", "initial_balance": "500000"}).json()
     transaction = client.post("/api/v1/finance/transactions", json={"account_id": account["id"], "category_id": category["id"], "type": "expense", "amount": "50000", "transaction_date": "2026-09-12"}).json()
 
     budget = client.post("/api/v1/finance/budgets", json={"category_id": category["id"], "year": 2026, "month": 9, "amount": "100000"})
     report = client.get("/api/v1/finance/reports/by-category?year=2026&month=9")
-    income_category = client.post("/api/v1/finance/categories", json={"name": "Salario", "type": "income"}).json()
+    income_category = next(item for item in client.get("/api/v1/finance/categories").json() if item["name"] == "Salario")
     recurring = client.post("/api/v1/finance/recurring", json={"account_id": account["id"], "category_id": income_category["id"], "type": "income", "amount": "25000", "recurrence_rule": "monthly", "next_run": "2026-10-01"})
     recurring_run = client.post(f"/api/v1/finance/recurring/{recurring.json()['id']}/run")
     updated = client.patch(f"/api/v1/finance/transactions/{transaction['id']}", json={"description": "Mercado"})

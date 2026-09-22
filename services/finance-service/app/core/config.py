@@ -26,3 +26,11 @@ def get_cors_origins() -> list[str]:
         "https://finance-front-dl9sf7pge-crdxzs-projects.vercel.app",
     ]
     return list(dict.fromkeys(configured + public_frontends))
+
+def get_database_url() -> str:
+    url = get_settings().database_url
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgres://")
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    return url

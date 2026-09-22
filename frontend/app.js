@@ -115,22 +115,6 @@ function showRecurringIncomeModal(type = "income") {
   };
 }
 
-function showCategoryModal() {
-  const modal = document.createElement("div");
-  modal.className = "modal-backdrop";
-  modal.innerHTML = `<section class="modal" role="dialog" aria-modal="true"><button class="modal-close" id="close-category" aria-label="Cerrar">×</button><p class="eyebrow">PERSONALIZAR CATEGORÍAS</p><h2>Nueva categoría</h2><form id="category-form"><label>Nombre<input id="category-name" maxlength="80" placeholder="Ej. Mascotas" required></label><label>Tipo<select id="category-type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></label><label>Color<input id="category-color" type="color" value="#6AA57D" required></label><label>Ícono<input id="category-icon" maxlength="40" value="tag" required></label><p class="form-message error-text" id="category-error"></p><button class="primary-button" type="submit">Crear categoría <span>→</span></button></form></section>`;
-  document.body.appendChild(modal);
-  modal.querySelector("#close-category").onclick = () => modal.remove();
-  modal.onclick = event => { if (event.target === modal) modal.remove(); };
-  modal.querySelector("#category-form").onsubmit = async event => {
-    event.preventDefault();
-    try {
-      await apiCall(api.finance, "/finance/categories", { method: "POST", body: JSON.stringify({ name: modal.querySelector("#category-name").value, type: modal.querySelector("#category-type").value, color: modal.querySelector("#category-color").value, icon: modal.querySelector("#category-icon").value }) });
-      modal.remove();
-      await loadApp();
-    } catch (caught) { modal.querySelector("#category-error").textContent = caught.message; }
-  };
-}
 function showDashboard(error = "") {
   const report = state.report || { overview: {}, cash_flow: [], expenses_by_category: [], recent_transactions: [], insights: [], budgets: [] };
   const overview = report.overview;
@@ -148,13 +132,12 @@ function showDashboard(error = "") {
   const actions = document.createElement("div");
   actions.id = "action-options";
   actions.className = "action-options";
-  actions.innerHTML = '<button type="button" data-action="expense">Registrar gasto</button><button type="button" data-action="income">Registrar ingreso</button><button type="button" data-action="fixed-expense">Programar gasto fijo mensual</button><button type="button" data-action="recurring">Programar ingreso recurrente</button><button type="button" data-action="category">Crear categoría</button>';
+  actions.innerHTML = '<button type="button" data-action="expense">Registrar gasto</button><button type="button" data-action="income">Registrar ingreso</button><button type="button" data-action="fixed-expense">Programar gasto fijo mensual</button><button type="button" data-action="recurring">Programar ingreso recurrente</button>';
   document.body.appendChild(actions);
   actions.querySelector('[data-action="expense"]').onclick = () => { actions.classList.remove("open"); showExpenseModal(); };
   actions.querySelector('[data-action="income"]').onclick = () => { actions.classList.remove("open"); showTransactionModal(); };
   actions.querySelector('[data-action="recurring"]').onclick = () => { actions.classList.remove("open"); showRecurringIncomeModal(); };
   actions.querySelector('[data-action="fixed-expense"]').onclick = () => { actions.classList.remove("open"); showRecurringIncomeModal("expense"); };
-  actions.querySelector('[data-action="category"]').onclick = () => { actions.classList.remove("open"); showCategoryModal(); };
 }
 
 function renderPeriodSelector() {
