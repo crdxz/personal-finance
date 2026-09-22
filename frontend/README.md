@@ -53,8 +53,6 @@ window.APP_CONFIG = {
 - Flujo de caja.
 - Gastos por categoría.
 - Movimientos recientes.
-- Cuentas financieras.
-- Presupuestos.
 - Cierre de sesión.
 
 El backend debe permitir el dominio Vercel en `CORS_ORIGINS` en los tres servicios.
