@@ -98,7 +98,8 @@ def test_budget_report_recurring_update_delete_and_pagination() -> None:
 
     budget = client.post("/api/v1/finance/budgets", json={"category_id": category["id"], "year": 2026, "month": 9, "amount": "100000"})
     report = client.get("/api/v1/finance/reports/by-category?year=2026&month=9")
-    recurring = client.post("/api/v1/finance/recurring", json={"account_id": account["id"], "category_id": category["id"], "type": "expense", "amount": "25000", "recurrence_rule": "monthly", "next_run": "2026-10-01"})
+    income_category = client.post("/api/v1/finance/categories", json={"name": "Salario", "type": "income"}).json()
+    recurring = client.post("/api/v1/finance/recurring", json={"account_id": account["id"], "category_id": income_category["id"], "type": "income", "amount": "25000", "recurrence_rule": "monthly", "next_run": "2026-10-01"})
     recurring_run = client.post(f"/api/v1/finance/recurring/{recurring.json()['id']}/run")
     updated = client.patch(f"/api/v1/finance/transactions/{transaction['id']}", json={"description": "Mercado"})
     page = client.get("/api/v1/finance/transactions?page=1&page_size=2")

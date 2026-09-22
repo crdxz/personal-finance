@@ -21,4 +21,5 @@ class RecurringTransaction(Base):
     next_run: Mapped[date] = mapped_column(Date, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
+    status: Mapped[str] = mapped_column(String(12), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

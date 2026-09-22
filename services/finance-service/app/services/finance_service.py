@@ -129,25 +129,37 @@ class FinanceService:
         category = self.repository.category(user_id, request.category_id) if request.category_id else None
         if request.category_id and (not category or category.type != request.type):
             raise HTTPException(status_code=422, detail="Category type must match recurring transaction type")
-        recurring = RecurringTransaction(user_id=user_id, account_id=request.account_id, category_id=request.category_id, type=request.type, amount=request.amount, currency="COP", recurrence_rule=request.recurrence_rule, next_run=request.next_run, description=request.description)
+        recurring = RecurringTransaction(user_id=user_id, account_id=request.account_id, category_id=request.category_id, type=request.type, amount=request.amount, currency="COP", recurrence_rule=request.recurrence_rule, next_run=request.next_run, description=request.description, status="active")
         self.db.add(recurring)
         self.db.commit()
         self.db.refresh(recurring)
         return recurring
 
     def run_recurring(self, user_id: int, recurring_id: int) -> Transaction:
-        recurring = self.db.scalar(select(RecurringTransaction).where(RecurringTransaction.id == recurring_id, RecurringTransaction.user_id == user_id, RecurringTransaction.is_active.is_(True)))
+        recurring = self.db.scalar(select(RecurringTransaction).where(RecurringTransaction.id == recurring_id, RecurringTransaction.user_id == user_id, RecurringTransaction.status == "active"))
         if not recurring:
             raise HTTPException(status_code=404, detail="Recurring transaction not found")
         transaction_request = TransactionCreate(account_id=recurring.account_id, category_id=recurring.category_id, type=recurring.type, amount=recurring.amount, currency="COP", description=recurring.description, transaction_date=recurring.next_run, is_recurring=True, recurrence_rule=recurring.recurrence_rule)
         transaction = self.create_transaction(user_id, transaction_request, f"recurring:{recurring.id}:{recurring.next_run.isoformat()}")
-        if recurring.recurrence_rule == "weekly":
-            recurring.next_run += timedelta(days=7)
-        elif recurring.recurrence_rule == "yearly":
-            recurring.next_run = recurring.next_run.replace(year=recurring.next_run.year + 1)
+        if recurring.recurrence_rule == "biweekly":
+            recurring.next_run += timedelta(days=14)
         else:
             next_month = recurring.next_run.month % 12 + 1
             next_year = recurring.next_run.year + (1 if recurring.next_run.month == 12 else 0)
             recurring.next_run = recurring.next_run.replace(year=next_year, month=next_month, day=min(recurring.next_run.day, monthrange(next_year, next_month)[1]))
         self.db.commit()
         return transaction
+
+    def set_recurring_status(self, user_id: int, recurring_id: int, status_value: str) -> RecurringTransaction:
+        recurring = self.db.scalar(select(RecurringTransaction).where(RecurringTransaction.id == recurring_id, RecurringTransaction.user_id == user_id))
+        if not recurring:
+            raise HTTPException(status_code=404, detail="Recurring transaction not found")
+        recurring.status = status_value
+        recurring.is_active = status_value == "active"
+        self.db.commit()
+        self.db.refresh(recurring)
+        return recurring
+
+    def process_due_recurring(self, user_id: int, today: date) -> list[Transaction]:
+        due = list(self.db.scalars(select(RecurringTransaction).where(RecurringTransaction.user_id == user_id, RecurringTransaction.status == "active", RecurringTransaction.next_run <= today)))
+        return [self.run_recurring(user_id, item.id) for item in due]

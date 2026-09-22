@@ -111,3 +111,23 @@ def list_recurring(user_id: int = Depends(get_current_user_id), service: Finance
 @router.post("/recurring/{recurring_id}/run", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 def run_recurring(recurring_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> TransactionResponse:
     return service.run_recurring(user_id, recurring_id)
+
+
+@router.post("/recurring/{recurring_id}/pause", response_model=RecurringResponse)
+def pause_recurring(recurring_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> RecurringResponse:
+    return service.set_recurring_status(user_id, recurring_id, "paused")
+
+
+@router.post("/recurring/{recurring_id}/resume", response_model=RecurringResponse)
+def resume_recurring(recurring_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> RecurringResponse:
+    return service.set_recurring_status(user_id, recurring_id, "active")
+
+
+@router.post("/recurring/{recurring_id}/cancel", response_model=RecurringResponse)
+def cancel_recurring(recurring_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> RecurringResponse:
+    return service.set_recurring_status(user_id, recurring_id, "cancelled")
+
+
+@router.post("/recurring/process-due", response_model=list[TransactionResponse])
+def process_due_recurring(today: date | None = None, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> list[TransactionResponse]:
+    return service.process_due_recurring(user_id, today or date.today())

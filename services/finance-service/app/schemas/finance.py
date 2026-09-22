@@ -129,9 +129,9 @@ class CategoryReport(BaseModel):
 class RecurringCreate(BaseModel):
     account_id: int
     category_id: int | None = None
-    type: MovementType
+    type: Literal["income"] = "income"
     amount: Decimal = Field(gt=0, decimal_places=2)
-    recurrence_rule: Literal["weekly", "monthly", "yearly"]
+    recurrence_rule: Literal["biweekly", "monthly"]
     next_run: date
     description: str | None = Field(default=None, max_length=500)
 
@@ -149,3 +149,4 @@ class RecurringResponse(BaseModel):
     next_run: date
     description: str | None
     is_active: bool
+    status: Literal["active", "paused", "cancelled"]
