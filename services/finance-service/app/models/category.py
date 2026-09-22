@@ -13,5 +13,7 @@ class Category(Base):
     user_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(80))
     type: Mapped[str] = mapped_column(String(10))
+    color: Mapped[str] = mapped_column(String(7), default="#6AA57D")
+    icon: Mapped[str] = mapped_column(String(40), default="tag")
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

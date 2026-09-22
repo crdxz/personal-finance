@@ -10,12 +10,17 @@ from app.schemas.finance import (
     AccountResponse,
     CategoryCreate,
     CategoryResponse,
+    CategoryUpdate,
+    DebtCreate,
+    DebtPaymentCreate,
+    DebtResponse,
     MonthlySummary,
     BudgetCreate,
     BudgetResponse,
     CategoryReport,
     RecurringCreate,
     RecurringResponse,
+    RecurringRunRequest,
     TransactionCreate,
     TransactionPage,
     TransactionResponse,
@@ -48,7 +53,34 @@ def create_category(request: CategoryCreate, user_id: int = Depends(get_current_
 
 @router.get("/categories", response_model=list[CategoryResponse])
 def list_categories(user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> list[CategoryResponse]:
+    service.ensure_default_categories(user_id)
     return service.repository.categories(user_id)
+
+
+@router.patch("/categories/{category_id}", response_model=CategoryResponse)
+def update_category(category_id: int, request: CategoryUpdate, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> CategoryResponse:
+    return service.update_category(user_id, category_id, request)
+
+
+@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(category_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> Response:
+    service.delete_category(user_id, category_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/debts", response_model=DebtResponse, status_code=status.HTTP_201_CREATED)
+def create_debt(request: DebtCreate, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> DebtResponse:
+    return DebtResponse(**service.debt_response(service.create_debt(user_id, request)))
+
+
+@router.get("/debts", response_model=list[DebtResponse])
+def list_debts(user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> list[DebtResponse]:
+    return [DebtResponse(**service.debt_response(debt)) for debt in service.repository.debts(user_id)]
+
+
+@router.post("/debts/{debt_id}/payments", response_model=DebtResponse)
+def add_debt_payment(debt_id: int, request: DebtPaymentCreate, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> DebtResponse:
+    return DebtResponse(**service.debt_response(service.add_debt_payment(user_id, debt_id, request)))
 
 
 @router.post("/transactions", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
@@ -109,8 +141,8 @@ def list_recurring(user_id: int = Depends(get_current_user_id), service: Finance
 
 
 @router.post("/recurring/{recurring_id}/run", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
-def run_recurring(recurring_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> TransactionResponse:
-    return service.run_recurring(user_id, recurring_id)
+def run_recurring(recurring_id: int, request: RecurringRunRequest | None = None, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> TransactionResponse:
+    return service.run_recurring(user_id, recurring_id, request.amount if request else None)
 
 
 @router.post("/recurring/{recurring_id}/pause", response_model=RecurringResponse)

@@ -32,6 +32,8 @@ class AccountResponse(BaseModel):
 class CategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     type: CategoryType
+    color: str = Field(default="#6AA57D", pattern=r"^#[0-9A-Fa-f]{6}$")
+    icon: str = Field(default="tag", min_length=1, max_length=40)
 
 
 class CategoryResponse(BaseModel):
@@ -42,10 +44,47 @@ class CategoryResponse(BaseModel):
     type: str
     user_id: int | None
     is_active: bool
+    color: str
+    icon: str
+
+
+class CategoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    icon: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class DebtCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    total_amount: Decimal = Field(gt=0, decimal_places=2)
+    monthly_payment: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+    start_date: date
+    due_date: date | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class DebtPaymentCreate(BaseModel):
+    amount: Decimal = Field(gt=0, decimal_places=2)
+    payment_date: date
+    note: str | None = Field(default=None, max_length=500)
+
+
+class DebtResponse(BaseModel):
+    id: int
+    name: str
+    total_amount: Decimal
+    paid_amount: Decimal
+    remaining_amount: Decimal
+    progress_percentage: Decimal
+    estimated_end_date: date | None
+    status: str
+    start_date: date
+    due_date: date | None
+    notes: str | None
 
 
 class TransactionCreate(BaseModel):
-    account_id: int
+    account_id: int | None = None
     category_id: int | None = None
     type: MovementType
     amount: Decimal = Field(gt=0, decimal_places=2)
@@ -127,9 +166,9 @@ class CategoryReport(BaseModel):
 
 
 class RecurringCreate(BaseModel):
-    account_id: int
+    account_id: int | None = None
     category_id: int | None = None
-    type: Literal["income"] = "income"
+    type: MovementType
     amount: Decimal = Field(gt=0, decimal_places=2)
     recurrence_rule: Literal["biweekly", "monthly"]
     next_run: date
@@ -150,3 +189,7 @@ class RecurringResponse(BaseModel):
     description: str | None
     is_active: bool
     status: Literal["active", "paused", "cancelled"]
+
+
+class RecurringRunRequest(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0, decimal_places=2)

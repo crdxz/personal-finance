@@ -73,6 +73,95 @@ def test_endpoints_require_authentication() -> None:
     app.dependency_overrides[get_current_user_id] = override_user_id
 
 
+def test_transaction_uses_default_account_when_account_is_omitted() -> None:
+    before = next(
+        account["balance"]
+        for account in client.get("/api/v1/finance/accounts").json()
+        if account["name"] == "Cuenta principal"
+    )
+    response = client.post(
+        "/api/v1/finance/transactions",
+        json={
+            "type": "expense",
+            "amount": "12500",
+            "currency": "COP",
+            "transaction_date": "2026-09-22",
+            "description": "Transporte",
+        },
+    )
+
+    assert response.status_code == 201
+    account = client.get("/api/v1/finance/accounts").json()[0]
+    assert account["name"] == "Cuenta principal"
+    assert float(before) - float(account["balance"]) == 12500
+
+
+def test_recurring_income_uses_default_account_when_account_is_omitted() -> None:
+    response = client.post(
+        "/api/v1/finance/recurring",
+        json={
+            "type": "income",
+            "amount": "2500000",
+            "recurrence_rule": "biweekly",
+            "next_run": "2026-10-01",
+            "description": "Salario",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["recurrence_rule"] == "biweekly"
+
+
+def test_categories_include_defaults_and_support_crud_customization() -> None:
+    categories = client.get("/api/v1/finance/categories")
+    assert categories.status_code == 200
+    assert any(item["name"] == "Alimentación" and item["color"] for item in categories.json())
+
+    created = client.post("/api/v1/finance/categories", json={"name": "Mascotas", "type": "expense", "color": "#123456", "icon": "paw"})
+    assert created.status_code == 201
+    category_id = created.json()["id"]
+    assert created.json()["color"] == "#123456"
+    assert created.json()["icon"] == "paw"
+
+    updated = client.patch(f"/api/v1/finance/categories/{category_id}", json={"name": "Mascotas y hogar", "color": "#654321"})
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Mascotas y hogar"
+    assert updated.json()["color"] == "#654321"
+
+    deleted = client.delete(f"/api/v1/finance/categories/{category_id}")
+    assert deleted.status_code == 204
+
+
+def test_fixed_expense_template_runs_with_actual_invoice_amount() -> None:
+    category = client.post("/api/v1/finance/categories", json={"name": "Servicios", "type": "expense"}).json()
+    recurring = client.post("/api/v1/finance/recurring", json={"category_id": category["id"], "type": "expense", "amount": "120000", "recurrence_rule": "monthly", "next_run": "2026-10-01", "description": "Internet"})
+
+    assert recurring.status_code == 201
+    run = client.post(f"/api/v1/finance/recurring/{recurring.json()['id']}/run", json={"amount": "137500"})
+
+    assert run.status_code == 201
+    assert run.json()["type"] == "expense"
+    assert run.json()["amount"] == "137500.00"
+
+
+def test_debt_progress_and_estimated_completion_date() -> None:
+    debt = client.post("/api/v1/finance/debts", json={"name": "Crédito educativo", "total_amount": "1000000", "monthly_payment": "250000", "start_date": "2026-09-01"})
+    assert debt.status_code == 201
+    assert debt.json()["progress_percentage"] == "0.00"
+    assert debt.json()["remaining_amount"] == "1000000.00"
+    assert debt.json()["estimated_end_date"] == "2026-12-01"
+
+    payment = client.post(f"/api/v1/finance/debts/{debt.json()['id']}/payments", json={"amount": "250000", "payment_date": "2026-09-22", "note": "Abono mensual"})
+    assert payment.status_code == 200
+    assert payment.json()["paid_amount"] == "250000.00"
+    assert payment.json()["progress_percentage"] == "25.00"
+
+    final = client.post(f"/api/v1/finance/debts/{debt.json()['id']}/payments", json={"amount": "750000", "payment_date": "2026-12-01"})
+    assert final.status_code == 200
+    assert final.json()["status"] == "paid"
+    assert final.json()["remaining_amount"] == "0.00"
+
+
 def test_cop_is_the_only_supported_currency() -> None:
     response = client.post("/api/v1/finance/accounts", json={"name": "Dólares", "type": "bank", "currency": "USD"})
     assert response.status_code == 422

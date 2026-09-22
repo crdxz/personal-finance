@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Account, Budget, Category, RecurringTransaction, Transaction
+from app.models import Account, Budget, Category, Debt, RecurringTransaction, Transaction
 
 
 class FinanceRepository:
@@ -18,9 +18,24 @@ class FinanceRepository:
     def accounts(self, user_id: int) -> list[Account]:
         return list(self.db.scalars(select(Account).where(Account.user_id == user_id, Account.is_active.is_(True)).order_by(Account.name)))
 
+    def default_account(self, user_id: int) -> Account:
+        account = self.db.scalar(select(Account).where(Account.user_id == user_id, Account.name == "Cuenta principal", Account.is_active.is_(True)))
+        if account:
+            return account
+        account = Account(user_id=user_id, name="Cuenta principal", type="cash", currency="COP", balance=0, is_active=True)
+        self.db.add(account)
+        self.db.flush()
+        return account
+
     def categories(self, user_id: int) -> list[Category]:
         statement = select(Category).where(Category.is_active.is_(True), (Category.user_id == user_id) | (Category.user_id.is_(None))).order_by(Category.name)
         return list(self.db.scalars(statement))
+
+    def user_categories(self, user_id: int) -> list[Category]:
+        return list(self.db.scalars(select(Category).where(Category.user_id == user_id, Category.is_active.is_(True)).order_by(Category.name)))
+
+    def category_owned(self, user_id: int, category_id: int) -> Category | None:
+        return self.db.scalar(select(Category).where(Category.id == category_id, Category.user_id == user_id, Category.is_active.is_(True)))
 
     def category(self, user_id: int, category_id: int) -> Category | None:
         return self.db.scalar(select(Category).where(Category.id == category_id, Category.is_active.is_(True), (Category.user_id == user_id) | (Category.user_id.is_(None))))
@@ -49,6 +64,12 @@ class FinanceRepository:
 
     def recurring(self, user_id: int) -> list[RecurringTransaction]:
         return list(self.db.scalars(select(RecurringTransaction).where(RecurringTransaction.user_id == user_id, RecurringTransaction.is_active.is_(True)).order_by(RecurringTransaction.next_run)))
+
+    def debt(self, user_id: int, debt_id: int) -> Debt | None:
+        return self.db.scalar(select(Debt).where(Debt.id == debt_id, Debt.user_id == user_id))
+
+    def debts(self, user_id: int) -> list[Debt]:
+        return list(self.db.scalars(select(Debt).where(Debt.user_id == user_id, Debt.status == "active").order_by(Debt.created_at.desc())))
 
     def commit(self) -> None:
         self.db.commit()

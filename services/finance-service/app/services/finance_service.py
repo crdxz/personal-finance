@@ -7,9 +7,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Account, Budget, Category, RecurringTransaction, Transaction
+from app.models import Account, Budget, Category, Debt, DebtPayment, RecurringTransaction, Transaction
 from app.repositories.finance_repository import FinanceRepository
-from app.schemas.finance import AccountCreate, BudgetCreate, CategoryCreate, RecurringCreate, TransactionCreate, TransactionUpdate, TransferCreate
+from app.schemas.finance import AccountCreate, BudgetCreate, CategoryCreate, CategoryUpdate, DebtCreate, DebtPaymentCreate, RecurringCreate, TransactionCreate, TransactionUpdate, TransferCreate
 
 
 class FinanceService:
@@ -25,18 +25,89 @@ class FinanceService:
         return account
 
     def create_category(self, user_id: int, request: CategoryCreate) -> Category:
-        category = Category(user_id=user_id, name=request.name, type=request.type)
+        category = Category(user_id=user_id, name=request.name, type=request.type, color=request.color, icon=request.icon)
         self.db.add(category)
         self.db.commit()
         self.db.refresh(category)
         return category
+
+    def ensure_default_categories(self, user_id: int) -> None:
+        if self.repository.user_categories(user_id):
+            return
+        defaults = [
+            ("Salario", "income", "#31775A", "briefcase"),
+            ("Otros ingresos", "income", "#6AA57D", "plus"),
+            ("Vivienda", "expense", "#E76F51", "home"),
+            ("Servicios", "expense", "#E5A94D", "bolt"),
+            ("Alimentación", "expense", "#D65D40", "utensils"),
+            ("Transporte", "expense", "#5A82A8", "car"),
+            ("Ocio", "expense", "#8B6FA8", "sparkles"),
+            ("Salud", "expense", "#B84D70", "heart"),
+            ("Educación", "expense", "#527764", "book"),
+            ("Otros gastos", "expense", "#78867E", "tag"),
+        ]
+        self.db.add_all([Category(user_id=user_id, name=name, type=category_type, color=color, icon=icon) for name, category_type, color, icon in defaults])
+        self.db.commit()
+
+    def update_category(self, user_id: int, category_id: int, request: CategoryUpdate) -> Category:
+        category = self.repository.category_owned(user_id, category_id)
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        for field in ("name", "color", "icon"):
+            value = getattr(request, field)
+            if value is not None:
+                setattr(category, field, value)
+        self.db.commit()
+        self.db.refresh(category)
+        return category
+
+    def delete_category(self, user_id: int, category_id: int) -> None:
+        category = self.repository.category_owned(user_id, category_id)
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        category.is_active = False
+        self.db.commit()
+
+    def debt_response(self, debt: Debt) -> dict[str, object]:
+        remaining = max(Decimal("0"), debt.total_amount - debt.paid_amount).quantize(Decimal("0.01"))
+        progress = min(Decimal("100"), (debt.paid_amount / debt.total_amount * 100) if debt.total_amount else Decimal("0"))
+        estimated_end = None
+        if debt.monthly_payment and debt.monthly_payment > 0 and remaining > 0:
+            months = int((remaining / debt.monthly_payment).to_integral_value(rounding="ROUND_CEILING"))
+            estimated_end = debt.start_date.replace(day=1)
+            for _ in range(max(0, months - 1)):
+                next_month = estimated_end.month % 12 + 1
+                next_year = estimated_end.year + (1 if estimated_end.month == 12 else 0)
+                estimated_end = estimated_end.replace(year=next_year, month=next_month)
+        return {"id": debt.id, "name": debt.name, "total_amount": debt.total_amount.quantize(Decimal("0.01")), "paid_amount": debt.paid_amount.quantize(Decimal("0.01")), "remaining_amount": remaining, "progress_percentage": progress.quantize(Decimal("0.01")), "estimated_end_date": estimated_end, "status": debt.status, "start_date": debt.start_date, "due_date": debt.due_date, "notes": debt.notes}
+
+    def create_debt(self, user_id: int, request: DebtCreate) -> Debt:
+        debt = Debt(user_id=user_id, name=request.name, total_amount=request.total_amount, monthly_payment=request.monthly_payment, start_date=request.start_date, due_date=request.due_date, notes=request.notes, status="active")
+        self.db.add(debt)
+        self.db.commit()
+        self.db.refresh(debt)
+        return debt
+
+    def add_debt_payment(self, user_id: int, debt_id: int, request: DebtPaymentCreate) -> Debt:
+        debt = self.repository.debt(user_id, debt_id)
+        if not debt:
+            raise HTTPException(status_code=404, detail="Debt not found")
+        if debt.paid_amount + request.amount > debt.total_amount:
+            raise HTTPException(status_code=422, detail="Payment exceeds remaining debt")
+        self.db.add(DebtPayment(user_id=user_id, debt_id=debt.id, amount=request.amount, payment_date=request.payment_date, note=request.note))
+        debt.paid_amount += request.amount
+        if debt.paid_amount >= debt.total_amount:
+            debt.status = "paid"
+        self.db.commit()
+        self.db.refresh(debt)
+        return debt
 
     def create_transaction(self, user_id: int, request: TransactionCreate, idempotency_key: str | None = None) -> Transaction:
         if idempotency_key:
             existing = self.repository.idempotent_transaction(user_id, idempotency_key)
             if existing:
                 return existing
-        account = self.repository.account(user_id, request.account_id)
+        account = self.repository.default_account(user_id) if request.account_id is None else self.repository.account(user_id, request.account_id)
         if not account:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
         category = self.repository.category(user_id, request.category_id) if request.category_id else None
@@ -123,23 +194,23 @@ class FinanceService:
         return [{"category_id": category_id, "category_name": name, "amount": amount} for category_id, name, amount in self.db.execute(statement).all()]
 
     def create_recurring(self, user_id: int, request: RecurringCreate) -> RecurringTransaction:
-        account = self.repository.account(user_id, request.account_id)
+        account = self.repository.default_account(user_id) if request.account_id is None else self.repository.account(user_id, request.account_id)
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
         category = self.repository.category(user_id, request.category_id) if request.category_id else None
         if request.category_id and (not category or category.type != request.type):
             raise HTTPException(status_code=422, detail="Category type must match recurring transaction type")
-        recurring = RecurringTransaction(user_id=user_id, account_id=request.account_id, category_id=request.category_id, type=request.type, amount=request.amount, currency="COP", recurrence_rule=request.recurrence_rule, next_run=request.next_run, description=request.description, status="active")
+        recurring = RecurringTransaction(user_id=user_id, account_id=account.id, category_id=request.category_id, type=request.type, amount=request.amount, currency="COP", recurrence_rule=request.recurrence_rule, next_run=request.next_run, description=request.description, status="active")
         self.db.add(recurring)
         self.db.commit()
         self.db.refresh(recurring)
         return recurring
 
-    def run_recurring(self, user_id: int, recurring_id: int) -> Transaction:
+    def run_recurring(self, user_id: int, recurring_id: int, actual_amount: Decimal | None = None) -> Transaction:
         recurring = self.db.scalar(select(RecurringTransaction).where(RecurringTransaction.id == recurring_id, RecurringTransaction.user_id == user_id, RecurringTransaction.status == "active"))
         if not recurring:
             raise HTTPException(status_code=404, detail="Recurring transaction not found")
-        transaction_request = TransactionCreate(account_id=recurring.account_id, category_id=recurring.category_id, type=recurring.type, amount=recurring.amount, currency="COP", description=recurring.description, transaction_date=recurring.next_run, is_recurring=True, recurrence_rule=recurring.recurrence_rule)
+        transaction_request = TransactionCreate(account_id=recurring.account_id, category_id=recurring.category_id, type=recurring.type, amount=actual_amount or recurring.amount, currency="COP", description=recurring.description, transaction_date=recurring.next_run, is_recurring=True, recurrence_rule=recurring.recurrence_rule)
         transaction = self.create_transaction(user_id, transaction_request, f"recurring:{recurring.id}:{recurring.next_run.isoformat()}")
         if recurring.recurrence_rule == "biweekly":
             recurring.next_run += timedelta(days=14)

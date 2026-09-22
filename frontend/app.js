@@ -5,7 +5,8 @@ const api = {
   reports: (cfg.REPORT_API_URL || "http://127.0.0.1:8002/api/v1").replace(/\/$/, ""),
 };
 const root = document.querySelector("#app");
-const state = { token: sessionStorage.getItem("access_token"), report: null, accounts: [], categories: [], transactions: [] };
+const now = new Date();
+const state = { token: sessionStorage.getItem("access_token"), report: null, accounts: [], categories: [], transactions: [], todayExpenses: [], debts: [], period: { year: now.getFullYear(), month: now.getMonth() + 1 } };
 const money = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 const formatMoney = value => money.format(Number(value || 0));
 const safe = value => String(value ?? "").replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c]));
@@ -27,17 +28,17 @@ function showAuth(register = false, error = "") {
   document.querySelector("#auth-form").onsubmit = async event => { event.preventDefault(); const email = document.querySelector("#email").value.trim(); const password = document.querySelector("#password").value; try { const missing = register ? weakParts(password) : []; if (missing.length) throw new Error(`La contraseña necesita ${missing.join(", ")}.`); const result = await apiCall(api.auth, register ? "/auth/register" : "/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); state.token = result.access_token; sessionStorage.setItem("access_token", state.token); await loadApp(); } catch (caught) { showAuth(register, caught.message); } };
 }
 
-async function loadApp() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  const end = now.toISOString().slice(0, 10);
+async function loadApp(period = state.period) {
+  state.period = period;
+  const start = new Date(period.year, period.month - 1, 1).toISOString().slice(0, 10);
+  const end = new Date(period.year, period.month, 0).toISOString().slice(0, 10);
   try {
-    [state.report, state.accounts, state.categories, state.transactions] = await Promise.all([apiCall(api.reports, `/reports/dashboard?start=${start}&end=${end}&granularity=day`), apiCall(api.finance, "/finance/accounts"), apiCall(api.finance, "/finance/categories"), apiCall(api.finance, "/finance/transactions?page=1&page_size=20")]);
+    [state.report, state.accounts, state.categories, state.transactions, state.todayExpenses, state.debts] = await Promise.all([apiCall(api.reports, `/reports/dashboard?start=${start}&end=${end}&granularity=day`), apiCall(api.finance, "/finance/accounts"), apiCall(api.finance, "/finance/categories"), apiCall(api.finance, "/finance/transactions?page=1&page_size=20"), apiCall(api.finance, `/finance/transactions?start=${end}&end=${end}&page=1&page_size=100`), apiCall(api.finance, "/finance/debts")]);
     showDashboard();
   } catch (caught) { showDashboard(caught.message); }
 }
 
-function logout() { state.token = null; sessionStorage.removeItem("access_token"); document.querySelectorAll("#new-transaction,.expense-action,.recurring-action").forEach(button => button.remove()); showAuth(); }
+function logout() { state.token = null; sessionStorage.removeItem("access_token"); document.querySelector("#action-menu")?.remove(); showAuth(); }
 function nav() { document.querySelectorAll("[data-page]").forEach(button => button.onclick = () => button.dataset.page === "dashboard" ? showDashboard() : showPage(button.dataset.page)); document.querySelectorAll("#logout").forEach(button => button.onclick = logout); }
 
 function showTransactionModal() {
@@ -69,20 +70,35 @@ function showTransactionModal() {
 }
 
 function showExpenseModal() {
-  showTransactionModal();
-  const type = document.querySelector("#movement-type");
-  if (type) {
-    type.value = "expense";
-    type.dispatchEvent(new Event("change"));
-  }
-}
-
-function showRecurringIncomeModal() {
-  const accountOptions = state.accounts.map(account => `<option value="${account.id}">${safe(account.name)} · ${formatMoney(account.balance)}</option>`).join("");
-  const categoryOptions = state.categories.filter(category => category.type === "income").map(category => `<option value="${category.id}">${safe(category.name)}</option>`).join("");
+  const categoryOptions = state.categories.filter(category => category.type === "expense").map(category => `<option value="${category.id}">${safe(category.name)}</option>`).join("");
   const modal = document.createElement("div");
   modal.className = "modal-backdrop";
-  modal.innerHTML = `<section class="modal" role="dialog" aria-modal="true"><button class="modal-close" id="close-recurring" aria-label="Cerrar">×</button><p class="eyebrow">INGRESO RECURRENTE</p><h2>Programar ingreso</h2><form id="recurring-form"><label>Cuenta<select id="recurring-account" required>${accountOptions || '<option value="">Crea primero una cuenta</option>'}</select></label><label>Categoría<select id="recurring-category"><option value="">Sin categoría</option>${categoryOptions}</select></label><label>Valor en COP<input id="recurring-amount" type="number" min="1" step="1" required></label><label>Frecuencia<select id="recurring-rule"><option value="monthly">Mensual</option><option value="biweekly">Quincenal</option></select></label><label>Primera fecha<input id="recurring-date" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Nombre del ingreso<input id="recurring-description" maxlength="500" placeholder="Ej. Salario"></label><p class="form-message error-text" id="recurring-error"></p><button class="primary-button" type="submit">Guardar recurrencia <span>→</span></button></form></section>`;
+  modal.innerHTML = `<section class="modal quick-expense" role="dialog" aria-modal="true"><button class="modal-close" id="close-expense" aria-label="Cerrar">×</button><p class="eyebrow">GASTO DIARIO</p><h2>Registrar gasto</h2><p class="muted">Completa estos campos y queda guardado en segundos.</p><form id="expense-form"><label>Valor en COP<input id="expense-amount" type="number" min="1" step="1" inputmode="numeric" placeholder="0" required autofocus></label><label>Categoría<select id="expense-category" required><option value="">Selecciona una categoría</option>${categoryOptions}</select></label><label>Fecha<input id="expense-date" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Nota <span class="muted">(opcional)</span><input id="expense-note" maxlength="500" placeholder="Ej. almuerzo, bus, cine..."></label><p class="form-message error-text" id="expense-error"></p><button class="primary-button" type="submit">Guardar gasto <span>→</span></button></form></section>`;
+  document.body.appendChild(modal);
+  modal.querySelector("#close-expense").onclick = () => modal.remove();
+  modal.onclick = event => { if (event.target === modal) modal.remove(); };
+  modal.querySelector("#expense-form").onsubmit = async event => {
+    event.preventDefault();
+    const submit = modal.querySelector("button[type=submit]");
+    const error = modal.querySelector("#expense-error");
+    submit.disabled = true;
+    try {
+      await apiCall(api.finance, "/finance/transactions", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ type: "expense", amount: modal.querySelector("#expense-amount").value, category_id: Number(modal.querySelector("#expense-category").value), currency: "COP", transaction_date: modal.querySelector("#expense-date").value, description: modal.querySelector("#expense-note").value || null }) });
+      modal.remove();
+      await loadApp();
+    } catch (caught) { error.textContent = caught.message; submit.disabled = false; }
+  };
+}
+
+function showRecurringIncomeModal(type = "income") {
+  const accountOptions = state.accounts.map(account => `<option value="${account.id}">${safe(account.name)} · ${formatMoney(account.balance)}</option>`).join("");
+  const categoryOptions = state.categories.filter(category => category.type === type).map(category => `<option value="${category.id}">${safe(category.name)}</option>`).join("");
+  const modal = document.createElement("div");
+  modal.className = "modal-backdrop";
+  const label = type === "expense" ? "GASTO FIJO MENSUAL" : "INGRESO RECURRENTE";
+  const title = type === "expense" ? "Programar gasto fijo" : "Programar ingreso";
+  const placeholder = type === "expense" ? "Ej. Arriendo, energía, internet" : "Ej. Salario";
+  modal.innerHTML = `<section class="modal" role="dialog" aria-modal="true"><button class="modal-close" id="close-recurring" aria-label="Cerrar">×</button><p class="eyebrow">${label}</p><h2>${title}</h2><form id="recurring-form"><label>Cuenta<select id="recurring-account"><option value="">Cuenta principal automática</option>${accountOptions}</select></label><label>Categoría<select id="recurring-category"><option value="">Sin categoría</option>${categoryOptions}</select></label><label>Valor estimado en COP<input id="recurring-amount" type="number" min="1" step="1" required></label><label>Frecuencia<select id="recurring-rule"><option value="monthly">Mensual</option>${type === "income" ? '<option value="biweekly">Quincenal</option>' : ""}</select></label><label>Primera fecha<input id="recurring-date" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Nombre<input id="recurring-description" maxlength="500" placeholder="${placeholder}"></label><p class="form-message error-text" id="recurring-error"></p><button class="primary-button" type="submit">Guardar recurrencia <span>→</span></button></form></section>`;
   document.body.appendChild(modal);
   modal.querySelector("#close-recurring").onclick = () => modal.remove();
   modal.onclick = event => { if (event.target === modal) modal.remove(); };
@@ -92,10 +108,27 @@ function showRecurringIncomeModal() {
     const error = modal.querySelector("#recurring-error");
     submit.disabled = true;
     try {
-      await apiCall(api.finance, "/finance/recurring", { method: "POST", body: JSON.stringify({ account_id: Number(modal.querySelector("#recurring-account").value), category_id: modal.querySelector("#recurring-category").value ? Number(modal.querySelector("#recurring-category").value) : null, type: "income", amount: modal.querySelector("#recurring-amount").value, recurrence_rule: modal.querySelector("#recurring-rule").value, next_run: modal.querySelector("#recurring-date").value, description: modal.querySelector("#recurring-description").value || null }) });
+      await apiCall(api.finance, "/finance/recurring", { method: "POST", body: JSON.stringify({ account_id: modal.querySelector("#recurring-account").value ? Number(modal.querySelector("#recurring-account").value) : null, category_id: modal.querySelector("#recurring-category").value ? Number(modal.querySelector("#recurring-category").value) : null, type, amount: modal.querySelector("#recurring-amount").value, recurrence_rule: modal.querySelector("#recurring-rule").value, next_run: modal.querySelector("#recurring-date").value, description: modal.querySelector("#recurring-description").value || null }) });
       modal.remove();
       await loadApp();
     } catch (caught) { error.textContent = caught.message; submit.disabled = false; }
+  };
+}
+
+function showCategoryModal() {
+  const modal = document.createElement("div");
+  modal.className = "modal-backdrop";
+  modal.innerHTML = `<section class="modal" role="dialog" aria-modal="true"><button class="modal-close" id="close-category" aria-label="Cerrar">×</button><p class="eyebrow">PERSONALIZAR CATEGORÍAS</p><h2>Nueva categoría</h2><form id="category-form"><label>Nombre<input id="category-name" maxlength="80" placeholder="Ej. Mascotas" required></label><label>Tipo<select id="category-type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></label><label>Color<input id="category-color" type="color" value="#6AA57D" required></label><label>Ícono<input id="category-icon" maxlength="40" value="tag" required></label><p class="form-message error-text" id="category-error"></p><button class="primary-button" type="submit">Crear categoría <span>→</span></button></form></section>`;
+  document.body.appendChild(modal);
+  modal.querySelector("#close-category").onclick = () => modal.remove();
+  modal.onclick = event => { if (event.target === modal) modal.remove(); };
+  modal.querySelector("#category-form").onsubmit = async event => {
+    event.preventDefault();
+    try {
+      await apiCall(api.finance, "/finance/categories", { method: "POST", body: JSON.stringify({ name: modal.querySelector("#category-name").value, type: modal.querySelector("#category-type").value, color: modal.querySelector("#category-color").value, icon: modal.querySelector("#category-icon").value }) });
+      modal.remove();
+      await loadApp();
+    } catch (caught) { modal.querySelector("#category-error").textContent = caught.message; }
   };
 }
 function showDashboard(error = "") {
@@ -103,22 +136,57 @@ function showDashboard(error = "") {
   const overview = report.overview;
   root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">L</span><span>ledger</span></div><nav><button class="nav-item active" data-page="dashboard">◈ <span>Resumen</span></button><button class="nav-item" data-page="transactions">↗ <span>Movimientos</span></button><button class="nav-item" data-page="accounts">□ <span>Cuentas</span></button><button class="nav-item" data-page="budgets">◎ <span>Presupuestos</span></button></nav><div class="side-bottom"><span class="cop-badge">COP</span><button class="logout" id="logout">Salir</button></div></aside><main class="content"><header class="topbar"><div><p class="eyebrow">RESUMEN MENSUAL</p><h1>Hola, vuelve a tomar el control.</h1></div><button class="avatar" id="logout">↗</button></header>${error ? `<div class="alert error-text">${safe(error)}</div>` : ""}<section class="hero-grid"><article class="balance-card"><div><p class="card-label">BALANCE NETO</p><strong>${formatMoney(overview.net)}</strong><p class="balance-note">${overview.savings_rate || 0}% de ahorro</p></div><span class="balance-glyph">₱</span></article><article class="metric-card"><p class="card-label">INGRESOS</p><strong>${formatMoney(overview.income)}</strong><span class="positive">${overview.income_count || 0} movimientos</span></article><article class="metric-card warm"><p class="card-label">GASTOS</p><strong>${formatMoney(overview.expenses)}</strong><span class="negative">${overview.expense_count || 0} movimientos</span></article></section><section class="dashboard-grid"><article class="surface"><div class="section-heading"><div><p class="eyebrow">RITMO DEL DINERO</p><h2>Flujo de caja</h2></div><span class="pill">COP</span></div><div class="bars">${renderBars(report.cash_flow)}</div></article><article class="surface"><div class="section-heading"><div><p class="eyebrow">DISTRIBUCIÓN</p><h2>Gastos por categoría</h2></div></div>${renderCategories(report.expenses_by_category)}</article></section><section class="dashboard-grid lower-grid"><article class="surface"><div class="section-heading"><div><p class="eyebrow">ACTIVIDAD</p><h2>Últimos movimientos</h2></div><button class="link-button" data-page="transactions">Ver todos →</button></div>${renderRecent(report.recent_transactions)}</article><article class="surface"><div class="section-heading"><div><p class="eyebrow">SEÑALES</p><h2>Lecturas del mes</h2></div></div>${renderInsights(report.insights)}</article></section></main></div>`;
   nav();
+  renderDailyExpenses();
+  renderDebts();
+  renderPeriodSelector();
   const movementButton = document.createElement("button");
   movementButton.className = "primary-button floating-action";
-  movementButton.id = "new-transaction";
-  movementButton.textContent = "+ Registrar movimiento";
-  movementButton.onclick = () => showTransactionModal();
+  movementButton.id = "action-menu";
+  movementButton.textContent = "+ Nueva acción";
+  movementButton.onclick = () => document.querySelector("#action-options").classList.toggle("open");
   document.body.appendChild(movementButton);
-  const expenseButton = document.createElement("button");
-  expenseButton.className = "primary-button floating-action expense-action";
-  expenseButton.textContent = "+ Gasto";
-  expenseButton.onclick = () => showExpenseModal();
-  document.body.appendChild(expenseButton);
-  const recurringButton = document.createElement("button");
-  recurringButton.className = "primary-button floating-action recurring-action";
-  recurringButton.textContent = "+ Ingreso recurrente";
-  recurringButton.onclick = () => showRecurringIncomeModal();
-  document.body.appendChild(recurringButton);
+  const actions = document.createElement("div");
+  actions.id = "action-options";
+  actions.className = "action-options";
+  actions.innerHTML = '<button type="button" data-action="expense">Registrar gasto</button><button type="button" data-action="income">Registrar ingreso</button><button type="button" data-action="fixed-expense">Programar gasto fijo mensual</button><button type="button" data-action="recurring">Programar ingreso recurrente</button><button type="button" data-action="category">Crear categoría</button>';
+  document.body.appendChild(actions);
+  actions.querySelector('[data-action="expense"]').onclick = () => { actions.classList.remove("open"); showExpenseModal(); };
+  actions.querySelector('[data-action="income"]').onclick = () => { actions.classList.remove("open"); showTransactionModal(); };
+  actions.querySelector('[data-action="recurring"]').onclick = () => { actions.classList.remove("open"); showRecurringIncomeModal(); };
+  actions.querySelector('[data-action="fixed-expense"]').onclick = () => { actions.classList.remove("open"); showRecurringIncomeModal("expense"); };
+  actions.querySelector('[data-action="category"]').onclick = () => { actions.classList.remove("open"); showCategoryModal(); };
+}
+
+function renderPeriodSelector() {
+  document.querySelector("#period-selector")?.remove();
+  const selector = document.createElement("div");
+  selector.id = "period-selector";
+  selector.className = "period-selector";
+  const months = Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${state.period.month === index + 1 ? "selected" : ""}>${new Date(2020, index, 1).toLocaleDateString("es-CO", { month: "long" })}</option>`).join("");
+  selector.innerHTML = `<label>Periodo<select id="period-month">${months}</select><select id="period-year"><option ${state.period.year === now.getFullYear() - 1 ? "selected" : ""}>${now.getFullYear() - 1}</option><option ${state.period.year === now.getFullYear() ? "selected" : ""}>${now.getFullYear()}</option><option ${state.period.year === now.getFullYear() + 1 ? "selected" : ""}>${now.getFullYear() + 1}</option></select></label>`;
+  document.querySelector(".topbar")?.appendChild(selector);
+  const reload = () => loadApp({ year: Number(selector.querySelector("#period-year").value), month: Number(selector.querySelector("#period-month").value) });
+  selector.querySelector("#period-month").onchange = reload;
+  selector.querySelector("#period-year").onchange = reload;
+}
+
+function renderDebts() {
+  document.querySelector("#debts-progress")?.remove();
+  const section = document.createElement("section");
+  section.id = "debts-progress";
+  section.className = "surface debts-progress";
+  section.innerHTML = `<div class="section-heading"><div><p class="eyebrow">COMPROMISOS FINANCIEROS</p><h2>Progreso de deudas</h2></div></div>${state.debts?.map(debt => `<div class="debt-row"><div class="debt-heading"><strong>${safe(debt.name)}</strong><span>${formatMoney(debt.paid_amount)} de ${formatMoney(debt.total_amount)}</span></div><div class="debt-progress"><i style="width:${Math.min(100, debt.progress_percentage)}%"></i></div><div class="debt-meta"><small>${debt.progress_percentage}% pagado · saldo ${formatMoney(debt.remaining_amount)}</small><small>${debt.estimated_end_date ? `Final estimado: ${debt.estimated_end_date}` : "Sin fecha estimada"}</small></div></div>`).join("") || '<p class="empty">No tienes deudas registradas.</p>'}`;
+  document.querySelector(".content")?.appendChild(section);
+}
+
+function renderDailyExpenses() {
+  document.querySelector("#daily-expenses")?.remove();
+  const section = document.createElement("section");
+  section.id = "daily-expenses";
+  section.className = "surface daily-expenses";
+  const items = state.todayExpenses?.items || [];
+  section.innerHTML = `<div class="section-heading"><div><p class="eyebrow">HOY · ${new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long" })}</p><h2>Gastos del día</h2></div><strong>${formatMoney(items.filter(item => item.type === "expense").reduce((total, item) => total + Number(item.amount), 0))}</strong></div>${items.filter(item => item.type === "expense").map(item => `<div class="daily-expense-row"><span class="recent-icon expense">↗</span><div><strong>${safe(item.description || "Gasto")}</strong><small>${safe(state.categories.find(category => category.id === item.category_id)?.name || "Sin categoría")}</small></div><b>${formatMoney(item.amount)}</b></div>`).join("") || '<p class="empty">Aún no registras gastos hoy.</p>'}`;
+  document.querySelector(".content")?.appendChild(section);
 }
 function renderBars(items = []) { if (!items.length) return '<p class="empty">Aún no hay movimientos en este periodo.</p>'; const max = Math.max(...items.map(item => Number(item.income) + Number(item.expenses)), 1); return items.slice(-12).map(item => `<div class="bar-column"><div class="bar-stack"><i class="bar income" style="height:${Math.max(4, Number(item.income) / max * 150)}px"></i><i class="bar expense" style="height:${Math.max(4, Number(item.expenses) / max * 150)}px"></i></div><small>${safe(item.period.slice(-5))}</small></div>`).join(""); }
 function renderCategories(items = []) { if (!items.length) return '<p class="empty">No hay categorías con gastos todavía.</p>'; return items.slice(0, 5).map(item => `<div class="category-row"><span class="category-icon">${safe(item.category_name[0])}</span><div class="category-main"><div><strong>${safe(item.category_name)}</strong><span>${formatMoney(item.amount)}</span></div><div class="progress"><i style="width:${Math.min(100, item.percentage)}%"></i></div><small>${item.percentage}% del total</small></div></div>`).join(""); }
