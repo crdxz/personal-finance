@@ -7,9 +7,9 @@ Deploy this monorepo as four independent Vercel projects. Supabase remains the s
 | Vercel project | Root Directory | Framework | Entrypoint |
 |---|---|---|---|
 | `personal-finance-frontend` | `frontend` | Other | static `index.html` |
-| `personal-finance-auth` | `services/auth-service` | FastAPI | `app.main:app` |
-| `personal-finance-finance` | `services/finance-service` | FastAPI | `app.main:app` |
-| `personal-finance-report` | `services/report-service` | FastAPI | `app.main:app` |
+| `personal-finance-auth` | `services/auth-service` | FastAPI | `main:app` |
+| `personal-finance-finance` | `services/finance-service` | FastAPI | `main:app` |
+| `personal-finance-report` | `services/report-service` | FastAPI | `main:app` |
 
 Create the four projects from the same GitHub repository. In each Vercel project, set the corresponding **Root Directory** before deploying. Do not deploy the repository root as one project.
 
@@ -41,7 +41,7 @@ These are public API URLs, not secrets. Update `CORS_ORIGINS` in all backend pro
 
 ### Vercel settings for Python services
 
-Vercel detects FastAPI from `requirements.txt` and the `[tool.vercel]` entrypoint in each service `pyproject.toml`. Leave the Build Command and Output Directory at their defaults. Do not start Uvicorn with a Vercel command; Vercel loads `app.main:app` as a serverless function.
+Vercel detects FastAPI from `requirements.txt` and the `[tool.vercel]` entrypoint in each service `pyproject.toml`. Each service also contains a root `main.py` that exposes `main:app`. Leave the Build Command and Output Directory at their defaults. Do not start Uvicorn with a Vercel command; Vercel loads `main:app` as a serverless function.
 
 ### Migrations
 
