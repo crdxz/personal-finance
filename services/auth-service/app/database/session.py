@@ -1,6 +1,7 @@
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_database_url
@@ -11,7 +12,10 @@ connect_args = (
     if database_url.startswith("sqlite")
     else {"connect_timeout": 10}
 )
-engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
+engine_options = {"connect_args": connect_args, "pool_pre_ping": True}
+if not database_url.startswith("sqlite"):
+    engine_options["poolclass"] = NullPool
+engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
