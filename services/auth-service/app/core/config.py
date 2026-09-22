@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "Personal Finance Auth Service"
     app_version: str = "1.0.0"
     environment: str = "development"
-    secret_key: str = "change-me-in-development"
+    secret_key: str = "academic-shared-jwt-secret-change-before-production"
     access_token_expire_minutes: int = 30
     database_url: str = "sqlite:///./auth.db"
     cors_origins: str = "http://127.0.0.1:5500,http://localhost:5500,https://personal-finance-pi-jet.vercel.app,https://finance-front-dl9sf7pge-crdxzs-projects.vercel.app"

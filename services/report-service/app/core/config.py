@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Report Service"
     app_version: str = "1.0.0"
-    secret_key: str = "change-me-before-production"
+    secret_key: str = "academic-shared-jwt-secret-change-before-production"
     database_url: str = "sqlite:///./reports.db"
     cors_origins: str = "http://127.0.0.1:5500,http://localhost:5500,https://personal-finance-pi-jet.vercel.app,https://finance-front-dl9sf7pge-crdxzs-projects.vercel.app"
 
