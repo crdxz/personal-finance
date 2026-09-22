@@ -1,5 +1,72 @@
 # Deployment separation
 
+## Vercel-only deployment
+
+Deploy this monorepo as four independent Vercel projects. Supabase remains the shared PostgreSQL database.
+
+| Vercel project | Root Directory | Framework | Entrypoint |
+|---|---|---|---|
+| `personal-finance-frontend` | `frontend` | Other | static `index.html` |
+| `personal-finance-auth` | `services/auth-service` | FastAPI | `app.main:app` |
+| `personal-finance-finance` | `services/finance-service` | FastAPI | `app.main:app` |
+| `personal-finance-report` | `services/report-service` | FastAPI | `app.main:app` |
+
+Create the four projects from the same GitHub repository. In each Vercel project, set the corresponding **Root Directory** before deploying. Do not deploy the repository root as one project.
+
+### Backend environment variables
+
+Set these in Auth, Finance and Report projects:
+
+```text
+DATABASE_URL=postgresql+psycopg://...
+SECRET_KEY=<the-same-strong-secret-in-all-three-services>
+CORS_ORIGINS=https://personal-finance-frontend.vercel.app
+```
+
+`DATABASE_URL` and `SECRET_KEY` must never be added to frontend files or committed to Git.
+
+### Frontend configuration
+
+After the three backend projects have their public URLs, update `frontend/config.js` and deploy the frontend:
+
+```javascript
+window.APP_CONFIG = {
+  AUTH_API_URL: "https://personal-finance-auth.vercel.app/api/v1",
+  FINANCE_API_URL: "https://personal-finance-finance.vercel.app/api/v1",
+  REPORT_API_URL: "https://personal-finance-report.vercel.app/api/v1",
+};
+```
+
+These are public API URLs, not secrets. Update `CORS_ORIGINS` in all backend projects with the final frontend URL, then redeploy the backends.
+
+### Vercel settings for Python services
+
+Vercel detects FastAPI from `requirements.txt` and the `[tool.vercel]` entrypoint in each service `pyproject.toml`. Leave the Build Command and Output Directory at their defaults. Do not start Uvicorn with a Vercel command; Vercel loads `app.main:app` as a serverless function.
+
+### Migrations
+
+Run Alembic from a local terminal or CI job, never on every serverless request:
+
+```powershell
+cd services/auth-service
+$env:DATABASE_URL="postgresql+psycopg://..."
+python -m alembic upgrade head
+
+cd ../finance-service
+python -m alembic upgrade head
+```
+
+Report Service is read-only and has no migrations of its own.
+
+### Vercel limitations to account for
+
+- Python services run as serverless functions, not permanent Uvicorn processes.
+- Do not use local SQLite, local files, workers or long-running background jobs.
+- Use Supabase for all persistent state.
+- Use the Supabase pooler connection for serverless database access.
+- Expect cold starts on the first request after inactivity.
+- Keep report queries bounded by date range and user; add aggregates if data grows.
+
 The frontend and backend are independent applications:
 
 - `frontend/` is a static site served by Nginx on port 80.
