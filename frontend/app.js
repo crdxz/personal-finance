@@ -5,7 +5,7 @@ const api = {
   reports: (cfg.REPORT_API_URL || "http://127.0.0.1:8002/api/v1").replace(/\/$/, ""),
 };
 const root = document.querySelector("#app");
-const state = { token: sessionStorage.getItem("access_token"), report: null, accounts: [], transactions: [] };
+const state = { token: sessionStorage.getItem("access_token"), report: null, accounts: [], categories: [], transactions: [] };
 const money = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 const formatMoney = value => money.format(Number(value || 0));
 const safe = value => String(value ?? "").replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c]));
@@ -32,18 +32,52 @@ async function loadApp() {
   const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
   const end = now.toISOString().slice(0, 10);
   try {
-    [state.report, state.accounts, state.transactions] = await Promise.all([apiCall(api.reports, `/reports/dashboard?start=${start}&end=${end}&granularity=day`), apiCall(api.finance, "/finance/accounts"), apiCall(api.finance, "/finance/transactions?page=1&page_size=20")]);
+    [state.report, state.accounts, state.categories, state.transactions] = await Promise.all([apiCall(api.reports, `/reports/dashboard?start=${start}&end=${end}&granularity=day`), apiCall(api.finance, "/finance/accounts"), apiCall(api.finance, "/finance/categories"), apiCall(api.finance, "/finance/transactions?page=1&page_size=20")]);
     showDashboard();
   } catch (caught) { showDashboard(caught.message); }
 }
 
-function logout() { state.token = null; sessionStorage.removeItem("access_token"); showAuth(); }
+function logout() { state.token = null; sessionStorage.removeItem("access_token"); document.querySelector("#new-transaction")?.remove(); showAuth(); }
 function nav() { document.querySelectorAll("[data-page]").forEach(button => button.onclick = () => button.dataset.page === "dashboard" ? showDashboard() : showPage(button.dataset.page)); document.querySelectorAll("#logout").forEach(button => button.onclick = logout); }
+
+function showTransactionModal() {
+  const accountOptions = state.accounts.map(account => `<option value="${account.id}">${safe(account.name)} · ${formatMoney(account.balance)}</option>`).join("");
+  const categoryOptions = state.categories.map(category => `<option value="${category.id}" data-type="${category.type}">${safe(category.name)} · ${category.type === "income" ? "Ingreso" : "Gasto"}</option>`).join("");
+  const modal = document.createElement("div");
+  modal.className = "modal-backdrop";
+  modal.innerHTML = `<section class="modal" role="dialog" aria-modal="true" aria-labelledby="movement-title"><button class="modal-close" id="close-movement" aria-label="Cerrar">×</button><p class="eyebrow">NUEVO MOVIMIENTO</p><h2 id="movement-title">Registrar ingreso o gasto</h2><form id="movement-form"><label>Tipo<select id="movement-type"><option value="income">Ingreso</option><option value="expense">Gasto</option></select></label><label>Cuenta<select id="movement-account" required>${accountOptions || '<option value="">Crea primero una cuenta</option>'}</select></label><label>Categoría<select id="movement-category"><option value="">Sin categoría</option>${categoryOptions}</select></label><label>Importe en COP<input id="movement-amount" type="number" min="1" step="1" placeholder="0" required></label><label>Fecha<input id="movement-date" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Descripción<input id="movement-description" maxlength="500" placeholder="Ej. Salario, mercado, transporte..."></label><p class="form-message error-text" id="movement-error"></p><button class="primary-button" type="submit">Guardar movimiento <span>→</span></button></form></section>`;
+  document.body.appendChild(modal);
+  const type = modal.querySelector("#movement-type");
+  const category = modal.querySelector("#movement-category");
+  const syncCategories = () => { [...category.options].forEach(option => { option.hidden = option.value && option.dataset.type !== type.value; }); if (category.selectedOptions[0]?.hidden) category.value = ""; };
+  syncCategories();
+  type.onchange = syncCategories;
+  modal.querySelector("#close-movement").onclick = () => modal.remove();
+  modal.onclick = event => { if (event.target === modal) modal.remove(); };
+  modal.querySelector("#movement-form").onsubmit = async event => {
+    event.preventDefault();
+    const submit = modal.querySelector("button[type=submit]");
+    const error = modal.querySelector("#movement-error");
+    submit.disabled = true;
+    error.textContent = "";
+    try {
+      await apiCall(api.finance, "/finance/transactions", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ account_id: Number(modal.querySelector("#movement-account").value), category_id: modal.querySelector("#movement-category").value ? Number(modal.querySelector("#movement-category").value) : null, type: type.value, amount: modal.querySelector("#movement-amount").value, currency: "COP", transaction_date: modal.querySelector("#movement-date").value, description: modal.querySelector("#movement-description").value || null }) });
+      modal.remove();
+      await loadApp();
+    } catch (caught) { error.textContent = caught.message; submit.disabled = false; }
+  };
+}
 function showDashboard(error = "") {
   const report = state.report || { overview: {}, cash_flow: [], expenses_by_category: [], recent_transactions: [], insights: [], budgets: [] };
   const overview = report.overview;
   root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">L</span><span>ledger</span></div><nav><button class="nav-item active" data-page="dashboard">◈ <span>Resumen</span></button><button class="nav-item" data-page="transactions">↗ <span>Movimientos</span></button><button class="nav-item" data-page="accounts">□ <span>Cuentas</span></button><button class="nav-item" data-page="budgets">◎ <span>Presupuestos</span></button></nav><div class="side-bottom"><span class="cop-badge">COP</span><button class="logout" id="logout">Salir</button></div></aside><main class="content"><header class="topbar"><div><p class="eyebrow">RESUMEN MENSUAL</p><h1>Hola, vuelve a tomar el control.</h1></div><button class="avatar" id="logout">↗</button></header>${error ? `<div class="alert error-text">${safe(error)}</div>` : ""}<section class="hero-grid"><article class="balance-card"><div><p class="card-label">BALANCE NETO</p><strong>${formatMoney(overview.net)}</strong><p class="balance-note">${overview.savings_rate || 0}% de ahorro</p></div><span class="balance-glyph">₱</span></article><article class="metric-card"><p class="card-label">INGRESOS</p><strong>${formatMoney(overview.income)}</strong><span class="positive">${overview.income_count || 0} movimientos</span></article><article class="metric-card warm"><p class="card-label">GASTOS</p><strong>${formatMoney(overview.expenses)}</strong><span class="negative">${overview.expense_count || 0} movimientos</span></article></section><section class="dashboard-grid"><article class="surface"><div class="section-heading"><div><p class="eyebrow">RITMO DEL DINERO</p><h2>Flujo de caja</h2></div><span class="pill">COP</span></div><div class="bars">${renderBars(report.cash_flow)}</div></article><article class="surface"><div class="section-heading"><div><p class="eyebrow">DISTRIBUCIÓN</p><h2>Gastos por categoría</h2></div></div>${renderCategories(report.expenses_by_category)}</article></section><section class="dashboard-grid lower-grid"><article class="surface"><div class="section-heading"><div><p class="eyebrow">ACTIVIDAD</p><h2>Últimos movimientos</h2></div><button class="link-button" data-page="transactions">Ver todos →</button></div>${renderRecent(report.recent_transactions)}</article><article class="surface"><div class="section-heading"><div><p class="eyebrow">SEÑALES</p><h2>Lecturas del mes</h2></div></div>${renderInsights(report.insights)}</article></section></main></div>`;
   nav();
+  const movementButton = document.createElement("button");
+  movementButton.className = "primary-button floating-action";
+  movementButton.id = "new-transaction";
+  movementButton.textContent = "+ Registrar movimiento";
+  movementButton.onclick = () => showTransactionModal();
+  document.body.appendChild(movementButton);
 }
 function renderBars(items = []) { if (!items.length) return '<p class="empty">Aún no hay movimientos en este periodo.</p>'; const max = Math.max(...items.map(item => Number(item.income) + Number(item.expenses)), 1); return items.slice(-12).map(item => `<div class="bar-column"><div class="bar-stack"><i class="bar income" style="height:${Math.max(4, Number(item.income) / max * 150)}px"></i><i class="bar expense" style="height:${Math.max(4, Number(item.expenses) / max * 150)}px"></i></div><small>${safe(item.period.slice(-5))}</small></div>`).join(""); }
 function renderCategories(items = []) { if (!items.length) return '<p class="empty">No hay categorías con gastos todavía.</p>'; return items.slice(0, 5).map(item => `<div class="category-row"><span class="category-icon">${safe(item.category_name[0])}</span><div class="category-main"><div><strong>${safe(item.category_name)}</strong><span>${formatMoney(item.amount)}</span></div><div class="progress"><i style="width:${Math.min(100, item.percentage)}%"></i></div><small>${item.percentage}% del total</small></div></div>`).join(""); }
