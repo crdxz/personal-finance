@@ -6,8 +6,6 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_current_user_id
 from app.database.session import get_db
 from app.schemas.finance import (
-    AccountCreate,
-    AccountResponse,
     CategoryResponse,
     CategoryUpdate,
     DebtCreate,
@@ -24,7 +22,6 @@ from app.schemas.finance import (
     TransactionPage,
     TransactionResponse,
     TransactionUpdate,
-    TransferCreate,
 )
 from app.services.finance_service import FinanceService
 
@@ -33,16 +30,6 @@ router = APIRouter(prefix="/finance", tags=["finance"])
 
 def get_service(db: Session = Depends(get_db)) -> FinanceService:
     return FinanceService(db)
-
-
-@router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-def create_account(request: AccountCreate, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> AccountResponse:
-    return service.create_account(user_id, request)
-
-
-@router.get("/accounts", response_model=list[AccountResponse])
-def list_accounts(user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> list[AccountResponse]:
-    return service.repository.accounts(user_id)
 
 
 @router.get("/categories", response_model=list[CategoryResponse])
@@ -97,11 +84,6 @@ def update_transaction(transaction_id: int, request: TransactionUpdate, user_id:
 def delete_transaction(transaction_id: int, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> Response:
     service.delete_transaction(user_id, transaction_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post("/transfers", response_model=list[TransactionResponse], status_code=status.HTTP_201_CREATED)
-def create_transfer(request: TransferCreate, user_id: int = Depends(get_current_user_id), service: FinanceService = Depends(get_service)) -> list[TransactionResponse]:
-    return list(service.create_transfer(user_id, request))
 
 
 @router.get("/summary/monthly", response_model=MonthlySummary)

@@ -6,27 +6,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-AccountType = Literal["cash", "bank", "savings", "credit_card", "digital_wallet"]
 MovementType = Literal["income", "expense"]
 CategoryType = Literal["income", "expense"]
-
-
-class AccountCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    type: AccountType
-    currency: Literal["COP"] = "COP"
-    initial_balance: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
-
-
-class AccountResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    name: str
-    type: str
-    currency: str
-    balance: Decimal
-    is_active: bool
 
 
 class CategoryResponse(BaseModel):
@@ -77,7 +58,6 @@ class DebtResponse(BaseModel):
 
 
 class TransactionCreate(BaseModel):
-    account_id: int | None = None
     category_id: int | None = None
     type: MovementType
     amount: Decimal = Field(gt=0, decimal_places=2)
@@ -92,7 +72,6 @@ class TransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    account_id: int
     category_id: int | None
     type: str
     amount: Decimal
@@ -100,15 +79,6 @@ class TransactionResponse(BaseModel):
     description: str | None
     transaction_date: date
     transfer_group_id: UUID | None
-
-
-class TransferCreate(BaseModel):
-    source_account_id: int
-    destination_account_id: int
-    amount: Decimal = Field(gt=0, decimal_places=2)
-    currency: Literal["COP"] = "COP"
-    description: str | None = Field(default=None, max_length=500)
-    transaction_date: date
 
 
 class MonthlySummary(BaseModel):
@@ -159,7 +129,6 @@ class CategoryReport(BaseModel):
 
 
 class RecurringCreate(BaseModel):
-    account_id: int | None = None
     category_id: int | None = None
     type: MovementType
     amount: Decimal = Field(gt=0, decimal_places=2)
@@ -172,7 +141,6 @@ class RecurringResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    account_id: int
     category_id: int | None
     type: str
     amount: Decimal

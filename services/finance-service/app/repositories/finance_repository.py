@@ -5,27 +5,12 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Account, Budget, Category, Debt, RecurringTransaction, Transaction
+from app.models import Budget, Category, Debt, RecurringTransaction, Transaction
 
 
 class FinanceRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
-
-    def account(self, user_id: int, account_id: int) -> Account | None:
-        return self.db.scalar(select(Account).where(Account.id == account_id, Account.user_id == user_id))
-
-    def accounts(self, user_id: int) -> list[Account]:
-        return list(self.db.scalars(select(Account).where(Account.user_id == user_id, Account.is_active.is_(True)).order_by(Account.name)))
-
-    def default_account(self, user_id: int) -> Account:
-        account = self.db.scalar(select(Account).where(Account.user_id == user_id, Account.name == "Cuenta principal", Account.is_active.is_(True)))
-        if account:
-            return account
-        account = Account(user_id=user_id, name="Cuenta principal", type="cash", currency="COP", balance=0, is_active=True)
-        self.db.add(account)
-        self.db.flush()
-        return account
 
     def categories(self, user_id: int) -> list[Category]:
         statement = select(Category).where(Category.is_active.is_(True), (Category.user_id == user_id) | (Category.user_id.is_(None))).order_by(Category.name)

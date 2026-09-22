@@ -12,7 +12,7 @@ class RecurringTransaction(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(index=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("financial_accounts.id"), index=True)
+    account_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
     type: Mapped[str] = mapped_column(String(10))
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))

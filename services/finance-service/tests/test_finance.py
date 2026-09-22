@@ -38,47 +38,26 @@ def test_health() -> None:
     assert response.json()["service"] == "finance-service"
 
 
-def test_account_income_expense_and_summary() -> None:
-    account = client.post("/api/v1/finance/accounts", json={"name": "Cuenta principal", "type": "bank", "currency": "COP", "initial_balance": "100000"})
-    assert account.status_code == 201
-    account_id = account.json()["id"]
-
-    income = client.post("/api/v1/finance/transactions", json={"account_id": account_id, "type": "income", "amount": "500000", "currency": "COP", "transaction_date": "2026-09-01"})
-    expense = client.post("/api/v1/finance/transactions", json={"account_id": account_id, "type": "expense", "amount": "125000", "currency": "COP", "transaction_date": "2026-09-02"})
+def test_income_expense_and_summary() -> None:
+    income = client.post("/api/v1/finance/transactions", json={"type": "income", "amount": "500000", "currency": "COP", "transaction_date": "2026-09-01"})
+    expense = client.post("/api/v1/finance/transactions", json={"type": "expense", "amount": "125000", "currency": "COP", "transaction_date": "2026-09-02"})
 
     assert income.status_code == 201
     assert expense.status_code == 201
-    assert client.get("/api/v1/finance/accounts").json()[0]["balance"] == "475000.00"
     summary = client.get("/api/v1/finance/summary/monthly?year=2026&month=9")
     assert summary.json()["income"] == "500000.00"
     assert summary.json()["expenses"] == "125000.00"
     assert summary.json()["balance"] == "375000.00"
 
 
-def test_transfer_moves_balance_between_accounts() -> None:
-    source = client.post("/api/v1/finance/accounts", json={"name": "Origen", "type": "bank", "initial_balance": "1000"}).json()
-    destination = client.post("/api/v1/finance/accounts", json={"name": "Destino", "type": "cash", "initial_balance": "0"}).json()
-    response = client.post("/api/v1/finance/transfers", json={"source_account_id": source["id"], "destination_account_id": destination["id"], "amount": "250", "transaction_date": str(date.today())})
-
-    assert response.status_code == 201
-    balances = {account["name"]: account["balance"] for account in client.get("/api/v1/finance/accounts").json()}
-    assert balances["Origen"] == "750.00"
-    assert balances["Destino"] == "250.00"
-
-
 def test_endpoints_require_authentication() -> None:
     app.dependency_overrides.pop(get_current_user_id)
-    response = client.get("/api/v1/finance/accounts")
+    response = client.get("/api/v1/finance/transactions")
     assert response.status_code == 401
     app.dependency_overrides[get_current_user_id] = override_user_id
 
 
-def test_transaction_uses_default_account_when_account_is_omitted() -> None:
-    before = next(
-        account["balance"]
-        for account in client.get("/api/v1/finance/accounts").json()
-        if account["name"] == "Cuenta principal"
-    )
+def test_transaction_does_not_require_an_account() -> None:
     response = client.post(
         "/api/v1/finance/transactions",
         json={
@@ -91,9 +70,7 @@ def test_transaction_uses_default_account_when_account_is_omitted() -> None:
     )
 
     assert response.status_code == 201
-    account = client.get("/api/v1/finance/accounts").json()[0]
-    assert account["name"] == "Cuenta principal"
-    assert float(before) - float(account["balance"]) == 12500
+    assert "account_id" not in response.json()
 
 
 def test_recurring_income_uses_default_account_when_account_is_omitted() -> None:
@@ -149,32 +126,28 @@ def test_debt_progress_and_estimated_completion_date() -> None:
 
 
 def test_cop_is_the_only_supported_currency() -> None:
-    response = client.post("/api/v1/finance/accounts", json={"name": "Dólares", "type": "bank", "currency": "USD"})
+    response = client.post("/api/v1/finance/transactions", json={"type": "expense", "amount": "100", "currency": "USD", "transaction_date": "2026-09-22"})
     assert response.status_code == 422
 
 
 def test_idempotency_does_not_duplicate_a_transaction() -> None:
-    account = client.post("/api/v1/finance/accounts", json={"name": "Idempotencia", "type": "cash", "initial_balance": "0"}).json()
-    payload = {"account_id": account["id"], "type": "income", "amount": "10000", "transaction_date": "2026-09-10"}
+    payload = {"type": "income", "amount": "10000", "transaction_date": "2026-09-10"}
     first = client.post("/api/v1/finance/transactions", json=payload, headers={"Idempotency-Key": "income-unique-1"})
     second = client.post("/api/v1/finance/transactions", json=payload, headers={"Idempotency-Key": "income-unique-1"})
 
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["id"] == second.json()["id"]
-    balances = {item["name"]: item["balance"] for item in client.get("/api/v1/finance/accounts").json()}
-    assert balances["Idempotencia"] == "10000.00"
 
 
 def test_budget_report_recurring_update_delete_and_pagination() -> None:
     category = next(item for item in client.get("/api/v1/finance/categories").json() if item["name"] == "Alimentación")
-    account = client.post("/api/v1/finance/accounts", json={"name": "Presupuesto", "type": "bank", "initial_balance": "500000"}).json()
-    transaction = client.post("/api/v1/finance/transactions", json={"account_id": account["id"], "category_id": category["id"], "type": "expense", "amount": "50000", "transaction_date": "2026-09-12"}).json()
+    transaction = client.post("/api/v1/finance/transactions", json={"category_id": category["id"], "type": "expense", "amount": "50000", "transaction_date": "2026-09-12"}).json()
 
     budget = client.post("/api/v1/finance/budgets", json={"category_id": category["id"], "year": 2026, "month": 9, "amount": "100000"})
     report = client.get("/api/v1/finance/reports/by-category?year=2026&month=9")
     income_category = next(item for item in client.get("/api/v1/finance/categories").json() if item["name"] == "Salario")
-    recurring = client.post("/api/v1/finance/recurring", json={"account_id": account["id"], "category_id": income_category["id"], "type": "income", "amount": "25000", "recurrence_rule": "monthly", "next_run": "2026-10-01"})
+    recurring = client.post("/api/v1/finance/recurring", json={"category_id": income_category["id"], "type": "income", "amount": "25000", "recurrence_rule": "monthly", "next_run": "2026-10-01"})
     recurring_run = client.post(f"/api/v1/finance/recurring/{recurring.json()['id']}/run")
     updated = client.patch(f"/api/v1/finance/transactions/{transaction['id']}", json={"description": "Mercado"})
     page = client.get("/api/v1/finance/transactions?page=1&page_size=2")
