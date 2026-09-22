@@ -34,6 +34,22 @@ app.dependency_overrides[get_current_user_id] = override_user_id
 client = TestClient(app)
 
 
+def test_cors_preflight_is_handled_before_authentication() -> None:
+    response = client.options(
+        "/api/v1/reports/dashboard",
+        headers={
+            "Origin": "https://personal-finance-pi-jet.vercel.app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://personal-finance-pi-jet.vercel.app"
+    assert "GET" in response.headers["access-control-allow-methods"]
+    assert "Authorization" in response.headers["access-control-allow-headers"]
+
+
 def seed_data() -> None:
     db = TestingSessionLocal()
     food = Category(id=1, user_id=7, name="Alimentación", type="expense", is_active=True)

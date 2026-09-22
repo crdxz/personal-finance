@@ -8,7 +8,7 @@ from app.core.config import get_cors_origins, get_settings
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version=settings.app_version, description="Read-only financial analytics for the Personal Finance platform")
-app.add_middleware(CORSMiddleware, allow_origins=get_cors_origins(), allow_origin_regex=r"https://[a-z0-9-]+\.vercel\.app", allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=get_cors_origins(), allow_origin_regex=r"https://[a-z0-9-]+\.vercel\.app", allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 
 
 @app.exception_handler(OperationalError)
